@@ -10,6 +10,7 @@
 class USpringArmComponent;
 class UCameraComponent;
 class UInputAction;
+class ARifleConnectActor;
 struct FInputActionValue;
 
 DECLARE_LOG_CATEGORY_EXTERN(LogTemplateCharacter, Log, All);
@@ -58,6 +59,20 @@ protected:
 
 	/** Initialize input action bindings */
 	virtual void SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent) override;
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+
+	/** Checked only when E is pressed, measured from the character in centimeters. */
+	UPROPERTY(EditAnywhere, Category="Weapon", meta=(ClampMin="1.0", Units="cm"))
+	float PickupDistance = 200.0f;
+
+	/** Adjust the cube's position and rotation relative to hand_r. */
+	UPROPERTY(EditAnywhere, Category="Weapon")
+	FTransform WeaponHandOffset = FTransform::Identity;
+
+	UPROPERTY(Transient, VisibleInstanceOnly, Category="Weapon")
+	TObjectPtr<ARifleConnectActor> EquippedRifle;
+
+	void TryPickupRifle();
 
 protected:
 

@@ -11,6 +11,12 @@
 #include "EnhancedInputSubsystems.h"
 #include "InputActionValue.h"
 #include "MCPTest_C.h"
+#include "RifleInteractActor.h"
+#include "RifleConnectActor.h"
+#include "Components/InputComponent.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "Engine/World.h"
+#include "InputCoreTypes.h"
 
 AMCPTest_CCharacter::AMCPTest_CCharacter()
 {
@@ -52,6 +58,9 @@ AMCPTest_CCharacter::AMCPTest_CCharacter()
 
 void AMCPTest_CCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
 {
+	Super::SetupPlayerInputComponent(PlayerInputComponent);
+	PlayerInputComponent->BindKey(EKeys::E, IE_Pressed, this, &AMCPTest_CCharacter::TryPickupRifle);
+
 	// Set up action bindings
 	if (UEnhancedInputComponent* EnhancedInputComponent = Cast<UEnhancedInputComponent>(PlayerInputComponent)) {
 		
@@ -70,6 +79,83 @@ void AMCPTest_CCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInput
 	{
 		UE_LOG(LogMCPTest_C, Error, TEXT("'%s' Failed to find an Enhanced Input component! This template is built to use the Enhanced Input system. If you intend to use the legacy system, then you will need to update this C++ file."), *GetNameSafe(this));
 	}
+}
+
+void AMCPTest_CCharacter::TryPickupRifle()
+{
+	if (IsValid(EquippedRifle) || !Controller || !GetWorld())
+	{
+		return;
+	}
+
+	// The center of the actual camera view must hit the ground weapon first.
+	FVector ViewLocation;
+	FRotator ViewRotation;
+	Controller->GetPlayerViewPoint(ViewLocation, ViewRotation);
+	const float TraceDistance = FVector::Distance(ViewLocation, GetActorLocation()) + PickupDistance;
+	FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(RiflePickup), false, this);
+	FHitResult Hit;
+	if (!GetWorld()->LineTraceSingleByChannel(Hit, ViewLocation,
+		ViewLocation + ViewRotation.Vector() * TraceDistance, ECC_Visibility, QueryParams))
+	{
+		return;
+	}
+
+	ARifleInteractActor* Pickup = Cast<ARifleInteractActor>(Hit.GetActor());
+	if (!IsValid(Pickup) || FVector::DistSquared(GetActorLocation(), Hit.ImpactPoint) > FMath::Square(PickupDistance))
+	{
+		return;
+	}
+
+	// Also prevent reaching through a wall when the third-person camera can see around it.
+	FHitResult ReachHit;
+	if (GetWorld()->LineTraceSingleByChannel(ReachHit, GetActorLocation(), Hit.ImpactPoint,
+		ECC_Visibility, QueryParams) && ReachHit.GetActor() != Pickup)
+	{
+		return;
+	}
+
+	const FName HandBone(TEXT("hand_r"));
+	if (!GetMesh() || GetMesh()->GetBoneIndex(HandBone) == INDEX_NONE)
+	{
+		UE_LOG(LogMCPTest_C, Warning, TEXT("Cannot equip rifle: character mesh has no hand_r bone."));
+		return;
+	}
+
+	FActorSpawnParameters SpawnParams;
+	SpawnParams.Owner = this;
+	SpawnParams.Instigator = this;
+	SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+	ARifleConnectActor* Weapon = GetWorld()->SpawnActor<ARifleConnectActor>(
+		ARifleConnectActor::StaticClass(), GetMesh()->GetSocketTransform(HandBone), SpawnParams);
+	if (!Weapon)
+	{
+		return;
+	}
+
+	if (!Weapon->AttachToComponent(GetMesh(), FAttachmentTransformRules::SnapToTargetNotIncludingScale, HandBone))
+	{
+		Weapon->Destroy();
+		return;
+	}
+	Weapon->SetActorRelativeTransform(WeaponHandOffset);
+	// Keep the pickup if spawning/attachment failed; roll back if it cannot be removed.
+	if (!Pickup->Destroy())
+	{
+		Weapon->Destroy();
+		return;
+	}
+	EquippedRifle = Weapon;
+}
+
+void AMCPTest_CCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	if (IsValid(EquippedRifle))
+	{
+		EquippedRifle->Destroy();
+		EquippedRifle = nullptr;
+	}
+	Super::EndPlay(EndPlayReason);
 }
 
 void AMCPTest_CCharacter::Move(const FInputActionValue& Value)
