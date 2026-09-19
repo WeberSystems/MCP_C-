@@ -11,6 +11,8 @@ class USpringArmComponent;
 class UCameraComponent;
 class UInputAction;
 class ARifleConnectActor;
+class ARifleInteractActor;
+class AGrenadeInteractActor;
 struct FInputActionValue;
 
 DECLARE_LOG_CATEGORY_EXTERN(LogTemplateCharacter, Log, All);
@@ -61,7 +63,7 @@ protected:
 	virtual void SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent) override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
-	/** Checked only when E is pressed, measured from the character in centimeters. */
+	/** Checked on mouse button presses, measured from the character in centimeters. */
 	UPROPERTY(EditAnywhere, Category="Weapon", meta=(ClampMin="1.0", Units="cm"))
 	float PickupDistance = 200.0f;
 
@@ -72,7 +74,16 @@ protected:
 	UPROPERTY(Transient, VisibleInstanceOnly, Category="Weapon")
 	TObjectPtr<ARifleConnectActor> EquippedRifle;
 
+	/** Position and rotation of the grenade relative to hand_l. */
+	UPROPERTY(EditAnywhere, Category="Weapon")
+	FTransform GrenadeHandOffset = FTransform::Identity;
+
+	UPROPERTY(Transient, VisibleInstanceOnly, Category="Weapon")
+	TObjectPtr<AGrenadeInteractActor> EquippedGrenade;
+
+	ARifleInteractActor* FindPickupInView() const;
 	void TryPickupRifle();
+	void TryPickupGrenade();
 
 protected:
 

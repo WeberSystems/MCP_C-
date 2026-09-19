@@ -12,6 +12,7 @@
 #include "InputActionValue.h"
 #include "MCPTest_C.h"
 #include "RifleInteractActor.h"
+#include "GrenadeInteractActor.h"
 #include "RifleConnectActor.h"
 #include "Components/InputComponent.h"
 #include "Components/SkeletalMeshComponent.h"
@@ -59,7 +60,8 @@ AMCPTest_CCharacter::AMCPTest_CCharacter()
 void AMCPTest_CCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
 {
 	Super::SetupPlayerInputComponent(PlayerInputComponent);
-	PlayerInputComponent->BindKey(EKeys::E, IE_Pressed, this, &AMCPTest_CCharacter::TryPickupRifle);
+	PlayerInputComponent->BindKey(EKeys::LeftMouseButton, IE_Pressed, this, &AMCPTest_CCharacter::TryPickupRifle);
+	PlayerInputComponent->BindKey(EKeys::RightMouseButton, IE_Pressed, this, &AMCPTest_CCharacter::TryPickupGrenade);
 
 	// Set up action bindings
 	if (UEnhancedInputComponent* EnhancedInputComponent = Cast<UEnhancedInputComponent>(PlayerInputComponent)) {
@@ -81,11 +83,11 @@ void AMCPTest_CCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInput
 	}
 }
 
-void AMCPTest_CCharacter::TryPickupRifle()
+ARifleInteractActor* AMCPTest_CCharacter::FindPickupInView() const
 {
-	if (IsValid(EquippedRifle) || !Controller || !GetWorld())
+	if (!Controller || !GetWorld())
 	{
-		return;
+		return nullptr;
 	}
 
 	// The center of the actual camera view must hit the ground weapon first.
@@ -94,23 +96,47 @@ void AMCPTest_CCharacter::TryPickupRifle()
 	Controller->GetPlayerViewPoint(ViewLocation, ViewRotation);
 	const float TraceDistance = FVector::Distance(ViewLocation, GetActorLocation()) + PickupDistance;
 	FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(RiflePickup), false, this);
+	if (IsValid(EquippedRifle))
+	{
+		QueryParams.AddIgnoredActor(EquippedRifle);
+	}
+	if (IsValid(EquippedGrenade))
+	{
+		QueryParams.AddIgnoredActor(EquippedGrenade);
+	}
 	FHitResult Hit;
 	if (!GetWorld()->LineTraceSingleByChannel(Hit, ViewLocation,
 		ViewLocation + ViewRotation.Vector() * TraceDistance, ECC_Visibility, QueryParams))
 	{
-		return;
+		return nullptr;
 	}
 
 	ARifleInteractActor* Pickup = Cast<ARifleInteractActor>(Hit.GetActor());
 	if (!IsValid(Pickup) || FVector::DistSquared(GetActorLocation(), Hit.ImpactPoint) > FMath::Square(PickupDistance))
 	{
-		return;
+		return nullptr;
 	}
 
 	// Also prevent reaching through a wall when the third-person camera can see around it.
 	FHitResult ReachHit;
 	if (GetWorld()->LineTraceSingleByChannel(ReachHit, GetActorLocation(), Hit.ImpactPoint,
 		ECC_Visibility, QueryParams) && ReachHit.GetActor() != Pickup)
+	{
+		return nullptr;
+	}
+	return Pickup;
+}
+
+void AMCPTest_CCharacter::TryPickupRifle()
+{
+	if (IsValid(EquippedRifle))
+	{
+		return;
+	}
+
+	ARifleInteractActor* Pickup = FindPickupInView();
+	// Grenades inherit from the rifle pickup, but must never enter the right hand.
+	if (!IsValid(Pickup) || Pickup->IsA<AGrenadeInteractActor>())
 	{
 		return;
 	}
@@ -148,8 +174,48 @@ void AMCPTest_CCharacter::TryPickupRifle()
 	EquippedRifle = Weapon;
 }
 
+void AMCPTest_CCharacter::TryPickupGrenade()
+{
+	if (IsValid(EquippedGrenade))
+	{
+		return;
+	}
+
+	AGrenadeInteractActor* Pickup = Cast<AGrenadeInteractActor>(FindPickupInView());
+	if (!IsValid(Pickup))
+	{
+		return;
+	}
+
+	const FName HandBone(TEXT("hand_l"));
+	if (!GetMesh() || GetMesh()->GetBoneIndex(HandBone) == INDEX_NONE)
+	{
+		UE_LOG(LogMCPTest_C, Warning, TEXT("Cannot equip grenade: character mesh has no hand_l bone."));
+		return;
+	}
+
+	// Keep the placed mesh and its scale when moving the grenade into the hand.
+	const FVector PickupScale = Pickup->GetActorScale3D();
+	if (!Pickup->AttachToComponent(GetMesh(), FAttachmentTransformRules::SnapToTargetNotIncludingScale, HandBone))
+	{
+		return;
+	}
+	FTransform HandTransform = GrenadeHandOffset;
+	HandTransform.SetScale3D(HandTransform.GetScale3D() * PickupScale);
+	Pickup->SetActorRelativeTransform(HandTransform);
+	Pickup->SetActorEnableCollision(false);
+	Pickup->SetOwner(this);
+	Pickup->SetInstigator(this);
+	EquippedGrenade = Pickup;
+}
+
 void AMCPTest_CCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+	if (IsValid(EquippedGrenade))
+	{
+		EquippedGrenade->Destroy();
+		EquippedGrenade = nullptr;
+	}
 	if (IsValid(EquippedRifle))
 	{
 		EquippedRifle->Destroy();

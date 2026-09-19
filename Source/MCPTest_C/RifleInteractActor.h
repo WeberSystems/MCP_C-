@@ -15,7 +15,7 @@ class MCPTEST_C_API ARifleInteractActor : public AActor
 public:
 	ARifleInteractActor();
 
-private:
+protected:
 	UPROPERTY(VisibleAnywhere, Category="Weapon")
 	TObjectPtr<UStaticMeshComponent> WeaponMesh;
 };
